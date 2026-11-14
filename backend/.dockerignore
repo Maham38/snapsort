@@ -1,0 +1,17 @@
+﻿.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+**/*service-account*.json
+**/*firebase-adminsdk*.json
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.git/
+.idea/
+.vscode/
+migration_backups/

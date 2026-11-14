@@ -1,0 +1,1 @@
+"""SnapSort backend application."""
