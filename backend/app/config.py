@@ -10,6 +10,7 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://snapsort:change-me@localhost:5432/snapsort"
     )
     firebase_credentials_file: str | None = None
+    firebase_credentials_json: str | None = None
     firebase_project_id: str | None = None
     allowed_origins: list[str] = ["http://localhost:3000"]
     supabase_url: str | None = None

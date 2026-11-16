@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from functools import lru_cache
+import json
 from pathlib import Path
 
 import firebase_admin
@@ -26,13 +27,26 @@ def firebase_app() -> firebase_admin.App:
             if settings.firebase_project_id
             else None,
         )
+    if settings.firebase_credentials_json:
+        try:
+            service_account = json.loads(settings.firebase_credentials_json)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                "FIREBASE_CREDENTIALS_JSON must contain valid JSON"
+            ) from error
+        return firebase_admin.initialize_app(
+            credentials.Certificate(service_account),
+            {"projectId": settings.firebase_project_id}
+            if settings.firebase_project_id
+            else None,
+        )
     if settings.firebase_project_id:
         return firebase_admin.initialize_app(
             options={"projectId": settings.firebase_project_id}
         )
     raise RuntimeError(
-        "Firebase is not configured. Set FIREBASE_CREDENTIALS_FILE or "
-        "FIREBASE_PROJECT_ID."
+        "Firebase is not configured. Set FIREBASE_CREDENTIALS_FILE, "
+        "FIREBASE_CREDENTIALS_JSON, or FIREBASE_PROJECT_ID."
     )
 
 
