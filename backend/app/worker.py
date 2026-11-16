@@ -151,6 +151,8 @@ def _process_matching(job_id: str) -> None:
 
 def run() -> None:
     client = redis_client()
+    client.ping()
+    logger.info("Redis connection successful")
 
     queues = {
         MATCHING_QUEUE: _process_matching,
