@@ -425,8 +425,9 @@ client-reported payment status is never accepted.
 
 The seeded plan prices and limits in migration `0004_billing` are placeholders.
 Change them in the database before launch and validate them with organizers.
-Enterprise activation is intentionally a manual/admin workflow and is not
-implemented as a public checkout option. Run
+Enterprise activation is intentionally an owner-controlled manual workflow,
+available through `POST /api/v1/events/{id}/plan/enterprise`, and is not a
+public checkout option. Run
 `python scripts/expire_billing.py` periodically to expire plans and flag data
 for retention review; the command never deletes data automatically.
 

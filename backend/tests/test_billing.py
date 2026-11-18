@@ -237,6 +237,7 @@ def test_webhook_is_idempotent_and_rejects_bad_signature(monkeypatch, db: Sessio
 
 def test_checkout_requires_ownership_and_organizer_role(db: Session) -> None:
     _plan(db, PlanTier.standard)
+    _plan(db, PlanTier.enterprise)
     owner = _organizer(db)
     event = _event(db, owner)
     other = _organizer(db, "other")
@@ -250,3 +251,7 @@ def test_checkout_requires_ownership_and_organizer_role(db: Session) -> None:
     with pytest.raises(HTTPException) as role_error:
         require_roles(Role.organizer)(attendee)
     assert role_error.value.status_code == 403
+
+    activated = main.activate_enterprise_plan(event.id, user=owner, db=db)
+    assert activated.tier == PlanTier.enterprise
+    assert activated.status == PlanStatus.active

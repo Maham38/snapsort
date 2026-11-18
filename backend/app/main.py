@@ -294,6 +294,24 @@ def create_checkout(
     )
 
 
+@app.post("/api/v1/events/{event_id}/plan/enterprise", response_model=EventPlanResponse)
+def activate_enterprise_plan(
+    event_id: str,
+    user: User = Depends(require_roles(Role.organizer)),
+    db: Session = Depends(get_db),
+) -> EventPlanResponse:
+    event = _owned_event(event_id, user, db)
+    plan = get_plan(db, PlanTier.enterprise)
+    if plan is None or not plan.active:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Enterprise plan is not configured.",
+        )
+    activate_event_plan(db, event=event, plan=plan)
+    db.commit()
+    return _event_plan_response(event, plan, get_or_create_usage(db, event.id))
+
+
 @app.post("/api/v1/billing/webhook", response_model=PaymentResponse)
 async def billing_webhook(
     request: Request,
