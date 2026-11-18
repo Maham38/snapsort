@@ -1,448 +1,799 @@
 # SnapSort
 
-SnapSort is a Flutter Android application for finding personal photographs in
-event galleries.
+### Find your photos, without the scrolling.
 
-## Phase 2: authentication
+SnapSort is an AI-powered event photo discovery application that helps attendees find photographs of themselves in large event galleries. Instead of manually browsing hundreds or thousands of pictures, attendees join an event, provide a selfie with explicit consent, and receive a personalized collection of matching photos.
 
-The app now includes Firebase Authentication integration for:
+SnapSort combines a Flutter mobile application, FastAPI backend, computer vision-based face matching, vector similarity search, and secure cloud photo storage.
 
-- Email/password registration and sign-in.
-- Password reset email requests.
-- Firebase auth session persistence through `authStateChanges`.
-- Firestore user profiles with a selected `role`.
-- Backend user roles synchronized through the authenticated `/api/v1/me/role`
-  endpoint.
-- Explicit sign-out and authentication error states.
+> **Project Status:** Active Development  
+> **Platform:** Android (Flutter)  
+> **Domain:** Artificial Intelligence / Computer Vision  
+> **Category:** Event Photography & Photo Discovery
 
-No Firebase credentials are committed to this repository.
+---
 
-## Local Firebase setup
+## Table of Contents
 
-1. Install the FlutterFire CLI:
+- [Overview](#overview)
+- [Problem Statement](#problem-statement)
+- [Objectives](#objectives)
+- [How It Works](#how-it-works)
+- [Features](#features)
+- [User Roles](#user-roles)
+- [AI and Computer Vision](#ai-and-computer-vision)
+- [System Architecture](#system-architecture)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Installation and Setup](#installation-and-setup)
+- [Environment Configuration](#environment-configuration)
+- [API Documentation](#api-documentation)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Security and Privacy](#security-and-privacy)
+- [Limitations](#limitations)
+- [Business Model](#business-model)
+- [Future Roadmap](#future-roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
-   ```powershell
-   dart pub global activate flutterfire_cli
-   ```
+---
 
-2. Log in to Firebase and configure the Android app:
+## Overview
 
-   ```powershell
-   firebase login
-   flutterfire configure
-   ```
+Event photographers capture hundreds or thousands of photographs at weddings, birthdays, university events, conferences, parties, and other gatherings. However, finding an individual photograph within a large event gallery can be time-consuming and frustrating.
 
-   Select the Firebase project and Android package configured by the CLI. This
-   generates the local `firebase_options.dart` and platform configuration
-   files. These files are environment-specific and should not be committed if
-   they contain project credentials.
+SnapSort simplifies this experience through AI-powered facial matching.
 
-3. In the Firebase console, enable **Authentication > Sign-in method >
-   Email/Password** and create the Firestore database.
+Organizers create events, photographers upload event photographs, and attendees use a selfie to find photographs in which they appear. The system processes images, detects faces, generates facial embeddings, and retrieves potential matches from the relevant event gallery.
 
-4. Apply rules so users can only write their own profile document. A production
-   deployment must also add server-side authorization rules before event data
-   is introduced.
+### Vision
 
-Without Firebase configuration, the app still launches and displays the Phase
-1 onboarding UI, but authentication actions show an explicit configuration
-error instead of using fake accounts.
+To make event photo discovery effortless by connecting people with their memories through intelligent, secure, and personalized photo retrieval.
 
-## Phase 3: FastAPI backend
+---
 
-The backend is in [backend/](backend/) and provides:
+## Problem Statement
 
-- FastAPI REST API with OpenAPI documentation.
-- Firebase ID-token verification on protected routes.
-- Role-based authorization for organizer event creation.
-- PostgreSQL/SQLAlchemy models for users, events, participants,
-  photographer assignments, photos, embeddings, matching jobs, favorites, and
-  consent records.
-- Alembic migration `0001_initial_schema`.
-- pgvector `Vector(512)` storage for face embeddings.
-- Explicit health, authentication, role, and event endpoints.
+Traditional event photo-sharing methods often require attendees to manually browse large galleries to find their photographs.
 
-Run locally:
+This creates several challenges:
 
-```powershell
-cd backend
-python -m pip install -e ".[test]"
-Copy-Item .env.example .env
-alembic upgrade head
-uvicorn app.main:app --reload
-```
+- Manually searching large photo collections is time-consuming.
+- Attendees may miss photographs in which they appear.
+- Organizers face difficulties distributing photographs efficiently.
+- Photographers may need to repeatedly share or organize large collections.
+- The photo discovery experience becomes less convenient as gallery size increases.
 
-The PostgreSQL `vector` extension must be enabled by the database owner. The
-backend does not create schemas automatically; migrations are the only schema
-change mechanism. Firebase credentials are loaded from environment
-configuration and are never stored in the repository.
+SnapSort addresses these problems by automating personalized photo discovery using computer vision and event-scoped facial matching.
 
-## Phase 4: organizer event management
+---
 
-Organizer functionality now includes:
+## Objectives
 
-- Authenticated event listing.
-- Event creation with collision-safe unique codes.
-- Event editing with ownership checks.
-- Event deletion with confirmation and related-record protection.
-- Event-code display and QR generation in the Flutter organizer dashboard.
+- Automate the discovery of event photographs.
+- Reduce the time required to find personal photographs.
+- Provide a personalized photo gallery for each attendee.
+- Simplify event photo management for organizers and photographers.
+- Support secure photo uploads and downloads.
+- Implement event-specific facial matching with explicit user consent.
+- Process large photo collections asynchronously.
+- Maintain privacy through authorization, event isolation, and secure storage.
 
-The Flutter API client uses the Firebase ID token as a bearer token. Android
-emulators call the local API through `http://10.0.2.2:8000`. A physical device
-cannot use `10.0.2.2`; use the computer's Wi-Fi/LAN address and keep both
-devices on the same network:
+---
 
-```powershell
-flutter run --dart-define=SNAPSORT_API_BASE_URL=http://<computer-lan-ip>:8000
-```
+## How It Works
 
-For a USB-connected Android device, port forwarding avoids LAN configuration:
+1. **Create an Event** — The organizer creates an event and generates a unique event code.
+2. **Share Event Access** — Attendees and photographers join through the event code or supported event access flow.
+3. **Upload Photos** — Photographers upload event photographs to secure cloud storage.
+4. **AI Processing** — The backend queues uploaded images for face detection and embedding generation.
+5. **Join the Event** — Attendees enter the event code to access the event.
+6. **Give Consent** — Attendees explicitly consent to facial matching for that event.
+7. **Submit a Selfie** — The attendee uploads a selfie to initiate the matching process.
+8. **Find Matches** — The AI system compares the selfie embedding with embeddings from photographs belonging to the event.
+9. **View My Photos** — Potential matching photographs are displayed in the attendee's personalized gallery.
+10. **Save and Share** — Attendees can favorite, download, or share their photographs.
 
-```powershell
-adb reverse tcp:8000 tcp:8000
-flutter run --dart-define=SNAPSORT_API_BASE_URL=http://127.0.0.1:8000
-```
+---
 
-If the physical device still cannot connect, allow inbound TCP port `8000`
-through Windows Firewall for the active private network. Release builds must
-use a deployed HTTPS API instead.
+## Features
 
-## Phase 5: photographer uploads
+### Authentication and User Management
 
-Photographer functionality now includes:
+- Firebase Authentication integration.
+- Email and password registration.
+- Secure sign-in.
+- Password reset functionality.
+- Persistent authentication sessions.
+- User profile management.
+- Role selection.
+- Backend Firebase token verification.
 
-- Photographer event-code joining and organizer assignment of photographer
-  Firebase users to events.
+### Event Management
 
-  The Photos tab is event-based for every role. Organizer and photographer
-  photos are grouped by the event they uploaded to. Attendee matching results
-  are saved with the event ID and event name, shown under that event, and each
-  event provides a Download all action. Matched photos are saved to the
-  device's `Pictures/SnapSort` album.
-- Assigned-event listing for photographers.
-- Multiple image selection for JPG, JPEG, PNG, and WebP files.
-- Per-file upload progress, retry state, and upload history metadata.
-- Short-lived Supabase Storage signed upload URLs.
-- Server-side upload authorization and object-existence verification.
+- Create events.
+- View events.
+- Update event information.
+- Delete events.
+- Generate unique event codes.
+- QR code/event code sharing.
+- Event-based access management.
+- Organizer ownership validation.
 
-Configure Supabase Storage before uploading real files:
+### Photographer Features
 
-```env
-SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_SECRET_KEY=<server-only-secret-key>
-SUPABASE_BUCKET_NAME=event-photos
-SUPABASE_SIGNED_URL_TTL_SECONDS=900
-```
+- Join events using event codes.
+- Access assigned or authorized events.
+- Upload multiple photographs.
+- Support for JPG, JPEG, PNG, and WebP formats.
+- Upload progress tracking.
+- Upload retry handling.
+- Upload history metadata.
 
-Create a private `event-photos` bucket in Supabase Storage. Keep the
-secret key only in `backend/.env`; never put it in Flutter or commit it.
-The backend never receives the file bytes. It creates a database photo record,
-the mobile client uploads directly to Supabase Storage using the short-lived
-signed URL, and the completion endpoint verifies that the object exists before
-leaving the photo ready for processing.
+### Attendee Features
 
-## Verify
-
-```powershell
-flutter analyze
-flutter test
-flutter build apk --debug
-```
-
-Backend verification:
-
-```powershell
-cd backend
-python -m pytest -q
-python -m compileall -q app migrations tests
-alembic heads
-```
-
-## Phase 6: AI processing and event-scoped matching
-
-Phase 6 adds server-side face processing without simulated embeddings:
-
-- Photo processing jobs are queued in Redis after upload completion.
-- The worker uses InsightFace with ONNX Runtime to create 512-dimensional
-  embeddings.
-- Embeddings are stored in PostgreSQL with an IVFFlat vector index.
-- Attendee face-matching requires event membership and active explicit consent.
-- Matching jobs and results are scoped to one event and one attendee.
-- Consent can be revoked through the API.
-
-Install the optional AI runtime and run the worker in a separate process:
-
-```powershell
-cd backend
-python -m pip install -e ".[ai,test]"
-alembic upgrade head
-python -m app.worker
-```
-
-Redis must be running at `REDIS_URL`. The first InsightFace model startup may
-download model assets; configure `AI_MODEL_ROOT` for a controlled model cache.
-If the AI runtime, model, Redis queue, or private Supabase object is unavailable,
-the job is marked failed or the API returns an explicit service error. No
-random or fallback face vectors are generated.
-
-Phase 6 API routes:
-
-- `POST /api/v1/events/{event_id}/consent`
-- `DELETE /api/v1/events/{event_id}/consent/{consent_type}`
-- `POST /api/v1/events/{event_id}/matching-jobs`
-- `GET /api/v1/matching-jobs/{job_id}`
-- `GET /api/v1/matching-jobs/{job_id}/results`
-
-## Phase 7: attendee matching
-
-Attendees can now:
-
-- Join an active event with its organizer-provided event code.
+- Join events using event codes.
 - View joined events.
-- Grant explicit face-matching consent for an event.
-- Select and securely upload one selfie to private Supabase Storage.
-- Submit an event-scoped matching job and observe its progress.
-- View personalized results through short-lived signed image URLs.
+- Provide event-specific matching consent.
+- Revoke consent.
+- Upload a selfie.
+- Initiate face-matching jobs.
+- Track matching progress.
+- View personalized matching results.
 
-The selfie object key is generated by the backend and is checked against the
-authenticated attendee before a matching job is accepted. Matching results
-remain scoped to the job's event and attendee. The Flutter attendee flow is
-available from the attendee dashboard's **Join an event** action.
+### Personalized Photo Gallery
 
-## Phase 8: gallery, favorites, downloads, and sharing
+- View matched photographs.
+- Lazy-loaded photo gallery.
+- Favorite and unfavorite photographs.
+- Download photos to the device.
+- Share photographs.
+- Access event-organized photo results.
 
-Completed matching photos are now exposed through an attendee-authorized
-gallery endpoint. Each image uses a short-lived signed Supabase download URL.
-The backend verifies that the attendee owns a completed matching result before
-returning a gallery image or changing its favorite state.
+### Personal Gallery
 
-The Flutter gallery supports:
+- Optional local photo-library scanning.
+- Permission-based device photo access.
+- Scan images locally without uploading them to SnapSort.
+- Deduplicate scanned images.
+- Exclude unwanted photos.
+- Save selected images to the SnapSort album.
 
-- Lazy network image loading in a two-column grid.
-- Favorite and remove-favorite actions.
-- Downloading a photo into the app's private documents directory.
-- Sharing a signed photo URL through the Android share sheet.
+### Billing and Event Plans
 
-Favorites and gallery access never accept an arbitrary storage key from the
-mobile client.
+- Organizer-focused event billing model.
+- Pay-per-event pricing structure.
+- Event plan management.
+- Usage limits and quotas.
+- Stripe Checkout integration when configured.
+- Server-side payment webhook verification.
 
-## Phase 9: on-device gallery organization
+---
 
-The optional personal-gallery flow is local to the Android device:
+## User Roles
 
-- Requests photo-library permission before scanning.
-- Scans up to 100 device images without uploading them.
-- Deduplicates the current scan by Android asset ID.
-- Lets the user exclude individual photos.
-- Saves selected photos to `Pictures/SnapSort`.
-- Skips files already saved by SnapSort.
-- Provides a switch to disable scanning from the screen.
+| Role | Description |
+|---|---|
+| **Organizer** | Creates and manages events, shares event codes, manages event plans, and oversees event photo delivery. |
+| **Photographer** | Joins authorized events and uploads event photographs. |
+| **Attendee** | Joins events, provides consent, submits selfies, and views personalized photographs. |
 
-Personal-gallery scanning is never sent to the FastAPI backend or used for
-event matching. Person-based grouping is intentionally not shown yet because
-no verified on-device face model has been integrated; the app does not
-simulate groups.
+Protected actions are validated by the backend rather than relying solely on the mobile application's UI.
 
-## Phase 10: security and privacy hardening
+---
 
-- Users can select organizer, photographer, or attendee during profile setup
-  and can update their role without administrator approval.
-- Consent is unique per user, event, and consent type. Revocation marks every
-  legacy duplicate inactive, and migration `0003_security_hardening` removes
-  duplicates before enforcing the unique index.
-- Release Flutter builds reject missing or non-HTTPS API URLs. Configure the
-  production endpoint explicitly:
+## AI and Computer Vision
 
-```powershell
-flutter build apk --release `
-  --dart-define=SNAPSORT_API_BASE_URL=https://api.example.com
-```
+SnapSort uses **Computer Vision and Machine Learning** for facial detection, facial representation, and similarity-based photo retrieval.
 
-The local `http://10.0.2.2:8000` endpoint remains available only for debug
-development. Never use it in a production build.
+It does not currently rely on a generative AI chatbot, Large Language Model (LLM), or Retrieval-Augmented Generation (RAG) pipeline for its core photo-matching functionality.
 
-## Phase 12: Android release
+### Face-Matching Pipeline
 
-Release builds never use the Android debug key. Provide a private keystore
-through environment variables before creating an APK or AAB:
+\`\`\`text
+         EVENT PHOTOGRAPHS
+                |
+                v
+       Private Cloud Storage
+                |
+                v
+       Background Job Queue
+             (Redis)
+                |
+                v
+        Face Detection
+          (InsightFace)
+                |
+                v
+      Embedding Extraction
+        (512 Dimensions)
+                |
+                v
+    PostgreSQL + pgvector
+                |
+                |
+        ATTENDEE SELFIE
+                |
+                v
+      Face Detection + Embedding
+                |
+                v
+       Vector Similarity Search
+                |
+                v
+     Event-Scoped Photo Matching
+                |
+                v
+       Personalized Photo Gallery
+\`\`\`
 
-```powershell
-$env:SNAPSORT_RELEASE_STORE_FILE="D:\secure\snapsort-upload.jks"
-$env:SNAPSORT_RELEASE_STORE_PASSWORD="<keystore-password>"
-$env:SNAPSORT_RELEASE_KEY_ALIAS="snapsort"
-$env:SNAPSORT_RELEASE_KEY_PASSWORD="<key-password>"
+### AI Technologies
 
-flutter build apk --release `
-  --dart-define=SNAPSORT_API_BASE_URL=https://api.example.com
+| Technology | Purpose |
+|---|---|
+| **InsightFace** | Face detection and face representation |
+| **ONNX Runtime** | Machine learning inference |
+| **Face Embeddings** | Numerical representation of detected faces |
+| **512-Dimensional Vectors** | Facial feature representations |
+| **pgvector** | Vector storage and similarity search |
+| **Cosine/Vector Similarity** | Retrieve potentially similar face representations |
+| **Redis** | Background processing queues |
 
-flutter build appbundle --release `
-  --dart-define=SNAPSORT_API_BASE_URL=https://api.example.com
-```
+### Processing Strategy
 
-Keep the keystore and passwords outside the repository and CI logs. The
-release output is generated under `build/app/outputs/`; do not commit it.
-The current Android application ID is `com.example.snapsort`; change it only
-after registering the new package with Firebase and updating the Android
-Firebase configuration.
+- Uploaded photographs are processed asynchronously.
+- Face detection identifies faces present in images.
+- Face embeddings are generated using the configured AI model.
+- Embeddings are stored in PostgreSQL using pgvector.
+- Attendee selfie embeddings are compared against embeddings from the relevant event.
+- Potential matches are returned through authorized matching results.
 
-## Phase 11: testing and performance
+Facial matching is probabilistic. Results may include false positives or false negatives and must not be treated as identity verification.
 
-Automated validation currently covers:
+---
 
-- FastAPI health and authentication boundaries.
-- Protected event, upload, gallery, favorite, and matching routes.
-- OpenAPI exposure of the Phase 6-8 API contract.
-- Flutter onboarding and form validation.
-- Python compilation and Alembic migration state.
+## System Architecture
 
-Run the suites:
+SnapSort follows a mobile-client and backend-service architecture with separate asynchronous AI processing.
 
-```powershell
-flutter analyze
-flutter test
-cd backend
-python -m pytest -q
-python -m compileall -q app migrations tests scripts
-alembic current
-```
+\`\`\`text
++----------------------------------+
+|         Flutter Mobile App       |
+|                                  |
+|  Organizer | Photographer         |
+|  Attendee  | Personal Gallery   |
++----------------+-----------------+
+                 |
+                 | HTTPS REST API
+                 | Firebase ID Token
+                 v
++----------------------------------+
+|          FastAPI Backend        |
+|                                  |
+| Authentication & Authorization    |
+| Event Management                |
+| Upload Management              |
+| Matching Jobs                  |
+| Gallery & Favorites            |
+| Billing & Usage               |
++----------+------------+---------+
+           |            |
+           v            v
+    PostgreSQL       Supabase
+     + pgvector      Storage
+           |
+           v
+         Redis
+      Job Queues
+           |
+           v
++----------------------------------+
+|      Background AI Worker       |
+|                                  |
+| Photo Processing                |
+| Face Detection                  |
+| Embedding Generation            |
+| Face Matching                  |
++----------------------------------+
+\`\`\`
 
-Measure local non-ML API latency:
+### Architectural Principles
 
-```powershell
-cd backend
-python scripts/benchmark_health.py
-```
+- REST API communication.
+- Firebase-based authentication.
+- Backend-enforced authorization.
+- Event-scoped access control.
+- Asynchronous image processing.
+- Secure cloud object storage.
+- Temporary signed URLs.
+- Database schema migrations.
+- Separation of mobile, backend, and worker responsibilities.
 
-The benchmark reports median, p95, and maximum latency for 100 local health
-requests. It is not a production load test. The required 300 ms p95 target
-must be measured separately against the deployed API under documented load.
-The under-three-second face-matching target must be measured after event
-indexing on a representative 5,000-photo dataset; upload and initial
-embedding generation are excluded from that target.
+---
 
-Run the background worker while testing photo processing and face matching:
+## Technology Stack
 
-```powershell
-cd backend
-python -m app.worker
-```
+| Layer | Technologies |
+|---|---|
+| Mobile Application | Flutter, Dart |
+| Frontend Architecture | Feature-based application structure |
+| Backend | Python, FastAPI |
+| API | REST, OpenAPI |
+| Authentication | Firebase Authentication |
+| User Profiles | Firestore |
+| Database | PostgreSQL |
+| Vector Database Extension | pgvector |
+| ORM | SQLAlchemy |
+| Database Migrations | Alembic |
+| AI / Computer Vision | InsightFace |
+| AI Inference Runtime | ONNX Runtime |
+| Face Embeddings | 512-dimensional embeddings |
+| Background Jobs | Redis, Python Worker |
+| Cloud Storage | Supabase Storage |
+| Data Validation | Pydantic |
+| Backend Testing | Pytest |
+| Mobile Testing | Flutter Test |
+| Containerization | Docker |
+| Deployment | Railway |
+| Version Control | Git, GitHub |
+| Payment Integration | Stripe Checkout and Webhooks |
 
-The deployed API and worker must run as separate services that share the same
-`DATABASE_URL`, `REDIS_URL`, Supabase settings, and AI model settings. The
-backend Docker image starts the API by default. For a Railway worker service,
-use the same backend image with this start command:
+---
 
-```powershell
-python -m app.worker
-```
+## Project Structure
 
-If the worker service is not running, matching jobs are accepted by the API but
-remain pending, and the attendee app stops waiting after five minutes with an
-explicit service-unavailable message.
+\`\`\`text
+SnapSort/
+│
+├── lib/                          # Flutter mobile application
+│   ├── main.dart
+│   ├── services/                  # API and authentication services
+│   ├── ...
+│   │
+├── android/                        # Android-specific configuration
+│
+├── backend/
+│   ├── app/
+│   │   ├── main.py                 # FastAPI application
+│   │   ├── models.py                # SQLAlchemy database models
+│   │   ├── schemas.py               # Pydantic schemas
+│   │   ├── storage.py                # Storage integration
+│   │   ├── worker.py                 # Background processing
+│   │   └── ...
+│   │
+│   ├── migrations/                  # Alembic migrations
+│   ├── tests/                       # Backend test suite
+│   ├── scripts/                      # Utility scripts
+│   └── .env.example                  # Environment template
+│
+├── test/                             # Flutter tests
+├── pubspec.yaml                      # Flutter dependencies
+└── README.md
+\`\`\`
 
-Photographers can join an active event from the app using the event code, then
-select and upload multiple JPG, JPEG, PNG, or WebP files. The organizer no
-longer needs to create a photographer assignment first.
+*This structure is an overview. Individual files and modules may evolve during development.*
 
-The Firebase service is in
-[lib/services/auth_service.dart](lib/services/auth_service.dart). UI and
-navigation remain in [lib/main.dart](lib/main.dart).
+---
 
-## Business model
+## Installation and Setup
 
-SnapSort should launch as a **B2B2C organizer-paid service**:
+### Prerequisites
 
-- **Primary customer:** event organizers, wedding planners, schools, and
-  photographers who need to deliver large event galleries.
-- **Free users:** attendees can join an event, give explicit matching consent,
-  find their photos, favorite them, download them, and share them.
-- **Photographers:** photographers can upload to assigned events at no extra
-  charge, which keeps the supply of event photos healthy.
+Install the following before setting up SnapSort:
 
-### Launch offer: pay per event
+- Git
+- Flutter SDK
+- Dart SDK
+- Python
+- PostgreSQL
+- pgvector extension
+- Redis
+- Firebase CLI
+- FlutterFire CLI
 
-Charge the organizer for each event instead of requiring a subscription before
-the product has proven repeat usage. A practical initial structure is:
+### 1. Clone the Repository
 
-1. **Free trial event:** one small event with a photo and attendee limit.
-2. **Standard event:** a fixed fee based on storage, photo volume, and matching
-   usage.
-3. **Pro event:** a higher limit plus branded galleries, longer retention,
-   analytics, and priority processing.
-4. **Enterprise:** negotiated pricing for venues, schools, and agencies that
-   run recurring events.
+\`\`\`bash
+git clone https://github.com/Maham38/snapsort.git
+cd snapsort
+\`\`\`
 
-Prices should be validated with 5-10 organizers before being treated as
-final. Keep AI matching and storage quotas explicit so an unusually large event
-cannot make a paid event unprofitable.
+### 2. Install Flutter Dependencies
 
-### Why this model fits SnapSort
+\`\`\`bash
+flutter pub get
+\`\`\`
 
-- The organizer receives the clearest business value: less manual gallery
-  delivery and a better attendee experience.
-- Event-based billing matches the existing `Event` boundary and naturally
-  covers variable storage, image processing, and signed-download costs.
-- Attendee access remains frictionless, improving event adoption and reducing
-  support requests.
-- Privacy and consent remain product differentiators; attendee data and face
-  matching should never be monetized through advertising or data resale.
+### 3. Configure Firebase
 
-### Growth path
+Install FlutterFire CLI:
 
-After measuring repeat organizer usage, evolve into a hybrid model: free small
-events, paid larger events, and an optional organizer subscription with bundled
-monthly event credits. Add billing only after tracking event volume, storage,
-matching-job cost, conversion from trial to paid, repeat organizer rate, and
-revenue per event.
+\`\`\`bash
+dart pub global activate flutterfire_cli
+\`\`\`
 
-### Billing setup
+Sign in to Firebase:
 
-Billing is implemented with Stripe Checkout and is disabled until the backend
-has all of these environment variables:
-
-```env
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_SUCCESS_URL=https://your-app.example/billing/success
-STRIPE_CANCEL_URL=https://your-app.example/billing/cancel
-```
-
-Keep the values only in `backend/.env` or the deployment secret manager. Never
-put Stripe keys in Flutter or source control. Apply the billing schema before
-starting the API:
-
-```powershell
-cd backend
-Copy-Item .env.example .env
-alembic upgrade head
-```
-
-Configure the Stripe webhook endpoint as
-`POST https://<api-host>/api/v1/billing/webhook` and subscribe it to
-`checkout.session.completed` (and failed/expired checkout events if those are
-enabled by the provider account). Stripe signatures are verified server-side;
-client-reported payment status is never accepted.
-
-The seeded plan prices and limits in migration `0004_billing` are placeholders.
-Change them in the database before launch and validate them with organizers.
-Enterprise activation is intentionally an owner-controlled manual workflow,
-available through `POST /api/v1/events/{id}/plan/enterprise`, and is not a
-public checkout option. Run
-`python scripts/expire_billing.py` periodically to expire plans and flag data
-for retention review; the command never deletes data automatically.
-
-## Firestore profile rules
-
-The app stores only the signed-in user's profile in Firestore. Deploy the
-least-privilege rules after selecting the `snapsort-6924e` Firebase project:
-
-```powershell
+\`\`\`bash
 firebase login
-firebase use snapsort-6924e
-firebase deploy --only firestore:rules
-```
+\`\`\`
 
-The rules allow users to read and create only their own profile. Initial
-profile creation may omit the role, and users may assign or change their role
-to `organizer`, `photographer`, or `attendee`. Backend endpoints still enforce
-the selected role for protected organizer and photographer operations.
+Configure Firebase for the Flutter project:
+
+\`\`\`bash
+flutterfire configure
+\`\`\`
+
+In the Firebase Console:
+
+- Enable Email/Password authentication.
+- Configure the Firestore database.
+- Configure the Android Firebase application.
+- Review and deploy Firestore security rules.
+
+### 4. Run the Flutter Application
+
+\`\`\`bash
+flutter run
+\`\`\`
+
+For a physical Android device connected to the same network as your computer:
+
+\`\`\`bash
+flutter run --dart-define=SNAPSORT_API_BASE_URL=http://<computer-lan-ip>:8000
+\`\`\`
+
+For Android emulators, the local computer API is typically accessible using:
+
+\`\`\`text
+http://10.0.2.2:8000
+\`\`\`
+
+For a USB-connected Android device, ADB port forwarding can be used:
+
+\`\`\`bash
+adb reverse tcp:8000 tcp:8000
+
+flutter run --dart-define=SNAPSORT_API_BASE_URL=http://127.0.0.1:8000
+\`\`\`
+
+### 5. Backend Setup
+
+Navigate to the backend directory:
+
+\`\`\`bash
+cd backend
+\`\`\`
+
+Create a Python virtual environment:
+
+\`\`\`powershell
+python -m venv .venv
+\`\`\`
+
+Activate it:
+
+\`\`\`powershell
+.\\.venv\\Scripts\\Activate.ps1
+\`\`\`
+
+Install backend dependencies:
+
+\`\`\`bash
+python -m pip install -e ".[test]"
+\`\`\`
+
+Create the environment configuration file:
+
+\`\`\`powershell
+Copy-Item .env.example .env
+\`\`\`
+
+Configure the required database, Redis, Firebase, and storage settings in `backend/.env`.
+
+Run database migrations:
+
+\`\`\`bash
+alembic upgrade head
+\`\`\`
+
+Start the backend API:
+
+\`\`\`bash
+uvicorn app.main:app --reload
+\`\`\`
+
+The local API will be available at:
+
+| Service | URL |
+|---|---|
+| API | http://127.0.0.1:8000 |
+| Swagger UI | http://127.0.0.1:8000/docs |
+| ReDoc | http://127.0.0.1:8000/redoc |
+
+### 6. Start the AI Worker
+
+Install AI dependencies:
+
+\`\`\`bash
+python -m pip install -e ".[ai,test]"
+\`\`\`
+
+Ensure PostgreSQL, Redis, Supabase Storage, and the AI model configuration are available.
+
+Start the background worker in a separate terminal:
+
+\`\`\`bash
+cd backend
+python -m app.worker
+\`\`\`
+
+The first AI model initialization may download required InsightFace model files.
+
+---
+
+## Environment Configuration
+
+Use `backend/.env.example` as the reference for required configuration variables.
+
+The backend environment may include:
+
+| Variable Category | Purpose |
+|---|---|
+| Database configuration | PostgreSQL connection |
+| Redis configuration | Background queue connectivity |
+| Firebase credentials | Server-side authentication verification |
+| Supabase URL | Storage service endpoint |
+| Supabase secret key | Backend storage access |
+| Storage bucket name | Event photo storage |
+| Signed URL expiration | Temporary upload/download access |
+| AI model configuration | Model files and cache location |
+| Stripe configuration | Billing and webhook integration |
+
+### Supabase Storage Setup
+
+Create a private Supabase Storage bucket named:
+
+\`\`\`text
+event-photos
+\`\`\`
+
+Configure the backend with the appropriate Supabase URL, server-side secret, bucket name, and signed URL expiration.
+
+SnapSort uses temporary signed URLs for photo uploads. The backend verifies uploaded objects before accepting them for processing.
+
+**Never commit real secrets, private keys, service account files, or production environment variables.**
+
+---
+
+## API Documentation
+
+SnapSort uses FastAPI to provide REST API endpoints.
+
+When the backend is running, interactive API documentation is available:
+
+| Documentation | Endpoint |
+|---|---|
+| Swagger UI | `/docs` |
+| ReDoc | `/redoc` |
+| OpenAPI JSON | `/openapi.json` |
+
+### API Modules
+
+- Authentication and user profile.
+- User roles.
+- Event management.
+- Event joining and participation.
+- Photographer uploads.
+- Photo processing.
+- Consent management.
+- Face-matching jobs.
+- Matching results.
+- Personal gallery.
+- Favorites.
+- Billing and event plans.
+
+### Representative Matching Endpoints
+
+\`\`\`http
+POST   /api/v1/events/{event_id}/consent
+DELETE /api/v1/events/{event_id}/consent/{consent_type}
+POST   /api/v1/events/{event_id}/matching-jobs
+GET    /api/v1/matching-jobs/{job_id}
+GET    /api/v1/matching-jobs/{job_id}/results
+\`\`\`
+
+For the complete endpoint list, request schemas, response schemas, and authentication requirements, refer to the running OpenAPI documentation.
+
+---
+
+## Testing
+
+SnapSort includes Flutter and backend testing workflows.
+
+### Flutter Analysis
+
+\`\`\`bash
+flutter analyze
+\`\`\`
+
+### Flutter Tests
+
+\`\`\`bash
+flutter test
+\`\`\`
+
+### Flutter Debug Build
+
+\`\`\`bash
+flutter build apk --debug
+\`\`\`
+
+### Backend Tests
+
+Run from the `backend` directory:
+
+\`\`\`bash
+python -m pytest -q
+\`\`\`
+
+Compile Python modules:
+
+\`\`\`bash
+python -m compileall -q app migrations tests scripts
+\`\`\`
+
+Check migration status:
+
+\`\`\`bash
+alembic current
+alembic heads
+\`\`\`
+
+### Performance Benchmark
+
+\`\`\`bash
+python scripts/benchmark_health.py
+\`\`\`
+
+The health benchmark measures API health-endpoint latency under a local test workload. It does not represent a full production load test or an end-to-end AI matching benchmark.
+
+---
+
+## Deployment
+
+SnapSort's backend API and background worker should run as separate services sharing the required database, Redis, storage, and AI configuration.
+
+### Backend API Service
+
+Start command:
+
+\`\`\`bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+\`\`\`
+
+### Background Worker Service
+
+Start command:
+
+\`\`\`bash
+python -m app.worker
+\`\`\`
+
+The worker must be running for queued photo processing and matching jobs to complete.
+
+### Android Release Build
+
+Release builds should use a deployed HTTPS backend:
+
+\`\`\`bash
+flutter build apk --release --dart-define=SNAPSORT_API_BASE_URL=https://<your-api-host>
+\`\`\`
+
+Use a private signing keystore for production release builds. Store signing credentials securely and never commit them to GitHub.
+
+---
+
+## Security and Privacy
+
+SnapSort processes personal photographs and facial representations. Privacy and access control are essential to the platform.
+
+- Firebase authentication for user identity.
+- Server-side verification of Firebase ID tokens.
+- Backend authorization for protected operations.
+- Event-scoped photo access.
+- Event-specific consent for face matching.
+- Consent revocation support.
+- Private object storage for event photographs.
+- Short-lived signed upload and download URLs.
+- Verification of uploaded objects.
+- Protected access to matching jobs and results.
+- Server secrets kept out of mobile builds.
+- Personal-gallery scanning performed locally on the device.
+- No intended cross-event face searching.
+
+Before public or commercial deployment, privacy policies, consent language, biometric-data requirements, retention periods, deletion processes, and applicable laws must be reviewed.
+
+---
+
+## Limitations
+
+- Face matching may produce false positives and false negatives.
+- Results depend on lighting, face angle, blur, occlusion, image resolution, and face visibility.
+- AI processing requires the worker, Redis, database, model runtime, and storage services to be available.
+- Initial AI setup may require downloading model files.
+- Large events may require additional infrastructure and optimization.
+- Matching accuracy and performance targets need validation against representative datasets.
+- Local gallery scanning does not currently provide verified person-based grouping.
+- Billing features depend on provider configuration and service availability.
+
+---
+
+## Business Model
+
+SnapSort is designed around an **organizer-paid B2B2C business model** with pay-per-event pricing.
+
+| Customer | Value |
+|---|---|
+| Event Organizer | Pays for event photo discovery, storage, and AI processing capacity. |
+| Photographer | Uploads event photographs as part of the event workflow. |
+| Attendee | Finds, views, favorites, downloads, and shares personal photos without a direct attendee fee. |
+
+### Potential Pricing Plans
+
+- **Free Trial:** Limited event capacity to experience SnapSort.
+- **Standard:** Core event photo discovery features with defined quotas.
+- **Pro:** Higher photo and attendee limits with expanded event capabilities.
+- **Enterprise:** Customized plans for venues, organizations, schools, and recurring event businesses.
+
+Pricing, quotas, and plan limits should be validated with real organizers and based on storage, processing, infrastructure, and operational costs.
+
+Stripe Checkout and webhook integrations require valid provider configuration before billing can be enabled in production.
+
+---
+
+## Future Roadmap
+
+Potential future improvements include:
+
+- Improving face-matching accuracy.
+- Optimizing similarity search for large galleries.
+- Performance improvements for high-volume events.
+- More comprehensive monitoring and operational analytics.
+- Improved event retention and deletion workflows.
+- Organizer analytics and event insights.
+- Improved subscription and billing experience.
+- Expanded automated test coverage.
+- CI/CD integration.
+- iOS application support.
+
+Roadmap items are planned possibilities and are not necessarily implemented.
+
+---
+
+## Contributing
+
+Contributions, bug reports, feature suggestions, and feedback are welcome.
+
+1. Fork the repository.
+2. Create a new feature branch.
+3. Make your changes.
+4. Run the relevant tests and checks.
+5. Submit a pull request with a clear description.
+
+For major features or architectural changes, open an issue first to discuss the proposed implementation.
+
+---
+
+## License
+
+No license has currently been specified for this repository.
+
+Until a license is added, permission to copy, modify, redistribute, or use this project should not be assumed.
+
+---
+
+<p align="center">
+  Built to make event memories easier to find.
+</p>
