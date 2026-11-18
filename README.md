@@ -327,6 +327,19 @@ cd backend
 python -m app.worker
 ```
 
+The deployed API and worker must run as separate services that share the same
+`DATABASE_URL`, `REDIS_URL`, Supabase settings, and AI model settings. The
+backend Docker image starts the API by default. For a Railway worker service,
+use the same backend image with this start command:
+
+```powershell
+python -m app.worker
+```
+
+If the worker service is not running, matching jobs are accepted by the API but
+remain pending, and the attendee app stops waiting after five minutes with an
+explicit service-unavailable message.
+
 Photographers can join an active event from the app using the event code, then
 select and upload multiple JPG, JPEG, PNG, or WebP files. The organizer no
 longer needs to create a photographer assignment first.
@@ -334,6 +347,88 @@ longer needs to create a photographer assignment first.
 The Firebase service is in
 [lib/services/auth_service.dart](lib/services/auth_service.dart). UI and
 navigation remain in [lib/main.dart](lib/main.dart).
+
+## Business model
+
+SnapSort should launch as a **B2B2C organizer-paid service**:
+
+- **Primary customer:** event organizers, wedding planners, schools, and
+  photographers who need to deliver large event galleries.
+- **Free users:** attendees can join an event, give explicit matching consent,
+  find their photos, favorite them, download them, and share them.
+- **Photographers:** photographers can upload to assigned events at no extra
+  charge, which keeps the supply of event photos healthy.
+
+### Launch offer: pay per event
+
+Charge the organizer for each event instead of requiring a subscription before
+the product has proven repeat usage. A practical initial structure is:
+
+1. **Free trial event:** one small event with a photo and attendee limit.
+2. **Standard event:** a fixed fee based on storage, photo volume, and matching
+   usage.
+3. **Pro event:** a higher limit plus branded galleries, longer retention,
+   analytics, and priority processing.
+4. **Enterprise:** negotiated pricing for venues, schools, and agencies that
+   run recurring events.
+
+Prices should be validated with 5-10 organizers before being treated as
+final. Keep AI matching and storage quotas explicit so an unusually large event
+cannot make a paid event unprofitable.
+
+### Why this model fits SnapSort
+
+- The organizer receives the clearest business value: less manual gallery
+  delivery and a better attendee experience.
+- Event-based billing matches the existing `Event` boundary and naturally
+  covers variable storage, image processing, and signed-download costs.
+- Attendee access remains frictionless, improving event adoption and reducing
+  support requests.
+- Privacy and consent remain product differentiators; attendee data and face
+  matching should never be monetized through advertising or data resale.
+
+### Growth path
+
+After measuring repeat organizer usage, evolve into a hybrid model: free small
+events, paid larger events, and an optional organizer subscription with bundled
+monthly event credits. Add billing only after tracking event volume, storage,
+matching-job cost, conversion from trial to paid, repeat organizer rate, and
+revenue per event.
+
+### Billing setup
+
+Billing is implemented with Stripe Checkout and is disabled until the backend
+has all of these environment variables:
+
+```env
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_SUCCESS_URL=https://your-app.example/billing/success
+STRIPE_CANCEL_URL=https://your-app.example/billing/cancel
+```
+
+Keep the values only in `backend/.env` or the deployment secret manager. Never
+put Stripe keys in Flutter or source control. Apply the billing schema before
+starting the API:
+
+```powershell
+cd backend
+Copy-Item .env.example .env
+alembic upgrade head
+```
+
+Configure the Stripe webhook endpoint as
+`POST https://<api-host>/api/v1/billing/webhook` and subscribe it to
+`checkout.session.completed` (and failed/expired checkout events if those are
+enabled by the provider account). Stripe signatures are verified server-side;
+client-reported payment status is never accepted.
+
+The seeded plan prices and limits in migration `0004_billing` are placeholders.
+Change them in the database before launch and validate them with organizers.
+Enterprise activation is intentionally a manual/admin workflow and is not
+implemented as a public checkout option. Run
+`python scripts/expire_billing.py` periodically to expire plans and flag data
+for retention review; the command never deletes data automatically.
 
 ## Firestore profile rules
 
