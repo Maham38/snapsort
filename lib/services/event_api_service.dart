@@ -29,6 +29,80 @@ class EventRecord {
   final String status;
 }
 
+class PlanRecord {
+  const PlanRecord({
+    required this.tier,
+    required this.maxPhotos,
+    required this.maxStorageBytes,
+    required this.maxMatchingSearches,
+    required this.retentionDays,
+    required this.priceCents,
+    required this.currency,
+  });
+
+  factory PlanRecord.fromJson(Map<String, dynamic> json) => PlanRecord(
+    tier: json['tier'] as String,
+    maxPhotos: json['max_photos'] as int,
+    maxStorageBytes: json['max_storage_bytes'] as int,
+    maxMatchingSearches: json['max_matching_searches'] as int,
+    retentionDays: json['retention_days'] as int,
+    priceCents: json['price_cents'] as int,
+    currency: json['currency'] as String,
+  );
+
+  final String tier;
+  final int maxPhotos;
+  final int maxStorageBytes;
+  final int maxMatchingSearches;
+  final int retentionDays;
+  final int priceCents;
+  final String currency;
+}
+
+class EventPlan {
+  const EventPlan({
+    required this.tier,
+    required this.status,
+    required this.expiresAt,
+    required this.limits,
+    required this.photoCount,
+    required this.storageBytes,
+    required this.matchingSearches,
+  });
+
+  factory EventPlan.fromJson(Map<String, dynamic> json) {
+    final usage = json['usage'] as Map<String, dynamic>;
+    return EventPlan(
+      tier: json['tier'] as String?,
+      status: json['status'] as String,
+      expiresAt: json['expires_at'] as String?,
+      limits: json['limits'] == null
+          ? null
+          : PlanRecord.fromJson(json['limits'] as Map<String, dynamic>),
+      photoCount: usage['photo_count'] as int,
+      storageBytes: usage['storage_bytes'] as int,
+      matchingSearches: usage['matching_searches'] as int,
+    );
+  }
+
+  final String? tier;
+  final String status;
+  final String? expiresAt;
+  final PlanRecord? limits;
+  final int photoCount;
+  final int storageBytes;
+  final int matchingSearches;
+}
+
+class CheckoutSession {
+  const CheckoutSession({required this.checkoutUrl});
+
+  factory CheckoutSession.fromJson(Map<String, dynamic> json) =>
+      CheckoutSession(checkoutUrl: json['checkout_url'] as String);
+
+  final String checkoutUrl;
+}
+
 class UploadedPhoto {
   const UploadedPhoto({
     required this.id,
@@ -87,6 +161,32 @@ class EventApiService {
     return values
         .map((value) => EventRecord.fromJson(value as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<EventPlan> getEventPlan(String eventId) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/api/v1/events/$eventId/plan'),
+      headers: await _headers(),
+    );
+    _check(response);
+    return EventPlan.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<CheckoutSession> createCheckout({
+    required String eventId,
+    required String tier,
+  }) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/api/v1/events/$eventId/checkout'),
+      headers: await _headers(),
+      body: jsonEncode({'tier': tier}),
+    );
+    _check(response);
+    return CheckoutSession.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
   }
 
   Future<void> updateRole(String role) async {

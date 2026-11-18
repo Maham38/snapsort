@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'services/auth_service.dart';
 import 'services/event_api_service.dart';
@@ -1331,15 +1332,17 @@ class _DashboardContentState extends State<_DashboardContent> {
           )
         else
           ..._events.map(
-            (event) => Card(
-              elevation: 0,
-              child: ListTile(
-                leading: const Icon(Icons.event, color: _primary),
-                title: Text(event.name),
-                subtitle: Text(event.description ?? event.eventCode),
-                trailing: Text(event.status),
-              ),
-            ),
+            (event) => role == UserRole.organizer
+                ? _OrganizerEventCard(event: event)
+                : Card(
+                    elevation: 0,
+                    child: ListTile(
+                      leading: const Icon(Icons.event, color: _primary),
+                      title: Text(event.name),
+                      subtitle: Text(event.description ?? event.eventCode),
+                      trailing: Text(event.status),
+                    ),
+                  ),
           ),
         if (isAttendee) ...[
           const SizedBox(height: 16),
@@ -1354,6 +1357,153 @@ class _DashboardContentState extends State<_DashboardContent> {
       ],
     );
   }
+}
+
+class _OrganizerEventCard extends StatefulWidget {
+  const _OrganizerEventCard({required this.event});
+
+  final EventRecord event;
+
+  @override
+  State<_OrganizerEventCard> createState() => _OrganizerEventCardState();
+}
+
+class _OrganizerEventCardState extends State<_OrganizerEventCard> {
+  final _api = EventApiService();
+  EventPlan? _plan;
+  bool _loading = true;
+  bool _working = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlan();
+  }
+
+  Future<void> _loadPlan() async {
+    try {
+      final plan = await _api.getEventPlan(widget.event.id);
+      if (mounted) setState(() => _plan = plan);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _upgrade() async {
+    final tier = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            const ListTile(
+              title: Text('Upgrade event'),
+              subtitle: Text('Choose a paid plan to unlock higher limits.'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Standard'),
+              onTap: () => Navigator.pop(context, 'standard'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_outlined),
+              title: const Text('Pro'),
+              onTap: () => Navigator.pop(context, 'pro'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (tier == null || !mounted) return;
+    setState(() => _working = true);
+    try {
+      final checkout = await _api.createCheckout(
+        eventId: widget.event.id,
+        tier: tier,
+      );
+      final opened = await launchUrl(
+        Uri.parse(checkout.checkoutUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) throw StateError('Could not open the payment page.');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Complete payment, then refresh this event plan.'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  String _usage(EventPlan plan) {
+    final limits = plan.limits;
+    if (limits == null) return 'No active plan';
+    return '${plan.photoCount}/${limits.maxPhotos} photos • '
+        '${_formatBytes(plan.storageBytes)}/${_formatBytes(limits.maxStorageBytes)} • '
+        '${plan.matchingSearches}/${limits.maxMatchingSearches} searches';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: _loading
+            ? const LinearProgressIndicator()
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.event, color: _primary),
+                    title: Text(widget.event.name),
+                    subtitle: Text(widget.event.description ?? widget.event.eventCode),
+                    trailing: Text(widget.event.status),
+                  ),
+                  if (_error != null)
+                    Text(_error!, style: TextStyle(color: Colors.red.shade700))
+                  else ...[
+                    Text(
+                      'Plan: ${_plan?.tier ?? 'Not activated'} (${_plan?.status ?? 'expired'})',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(_plan == null ? '' : _usage(_plan!)),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        onPressed: _working ? null : _upgrade,
+                        icon: const Icon(Icons.upgrade),
+                        label: Text(_working ? 'Opening...' : 'Upgrade'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+String _formatBytes(int bytes) {
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).ceil()} KB';
+  if (bytes < 1024 * 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
 }
 
 class DeviceGalleryScreen extends StatefulWidget {
@@ -1667,6 +1817,8 @@ class AttendeeMatchingScreen extends StatefulWidget {
 }
 
 class _AttendeeMatchingScreenState extends State<AttendeeMatchingScreen> {
+  static const _matchingTimeout = Duration(minutes: 5);
+
   final _api = EventApiService();
   PlatformFile? _selfie;
   bool _consented = false;
@@ -1674,6 +1826,7 @@ class _AttendeeMatchingScreenState extends State<AttendeeMatchingScreen> {
   String _status = 'Choose a clear selfie to search this event.';
   List<MatchResult> _results = [];
   Timer? _poller;
+  DateTime? _matchingStartedAt;
 
   @override
   void dispose() {
@@ -1717,6 +1870,7 @@ class _AttendeeMatchingScreenState extends State<AttendeeMatchingScreen> {
         eventId: widget.event.id,
         storageKey: upload.storageKey,
       );
+      _matchingStartedAt = DateTime.now();
       _status = 'Matching in progress...';
       _poller = Timer.periodic(
         const Duration(seconds: 2),
@@ -1735,10 +1889,24 @@ class _AttendeeMatchingScreenState extends State<AttendeeMatchingScreen> {
 
   Future<void> _poll(String jobId) async {
     try {
+      final startedAt = _matchingStartedAt;
+      if (startedAt != null &&
+          DateTime.now().difference(startedAt) >= _matchingTimeout) {
+        _poller?.cancel();
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _status =
+                'Photo search is taking too long. The matching service may be offline. Please try again later.';
+          });
+        }
+        return;
+      }
       final job = await _api.getMatchingJob(jobId);
       if (!mounted) return;
       if (job.status == 'complete') {
         _poller?.cancel();
+        _matchingStartedAt = null;
         final results = await _api.getMatchingResults(jobId);
         var saved = 0;
         for (final result in results) {
@@ -1766,6 +1934,7 @@ class _AttendeeMatchingScreenState extends State<AttendeeMatchingScreen> {
         });
       } else if (job.status == 'failed') {
         _poller?.cancel();
+        _matchingStartedAt = null;
         setState(() {
           _busy = false;
           _status =
@@ -1777,6 +1946,7 @@ class _AttendeeMatchingScreenState extends State<AttendeeMatchingScreen> {
       if (mounted) {
         setState(() {
           _busy = false;
+          _matchingStartedAt = null;
           _status = error.toString();
         });
       }

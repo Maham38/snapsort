@@ -44,6 +44,7 @@ class PhotoUploadService {
     final path = item.file.path;
     if (path == null) throw StateError('Could not read ${item.file.name}.');
     final file = File(path);
+    final sizeBytes = await file.length();
     final contentType = _contentType(item.file.name);
     final request = await _client.post(
       Uri.parse('$_baseUrl/api/v1/events/$eventId/uploads'),
@@ -54,6 +55,7 @@ class PhotoUploadService {
       body: jsonEncode({
         'filename': item.file.name,
         'content_type': contentType,
+        'size_bytes': sizeBytes,
         'checksum': null,
       }),
     ).timeout(const Duration(seconds: 30));
