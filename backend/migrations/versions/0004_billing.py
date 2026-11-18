@@ -37,33 +37,74 @@ def upgrade() -> None:
         sa.Column("currency", sa.String(3), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.true()),
     )
-    op.bulk_insert(
-        sa.table(
-            "plans",
-            sa.column("tier", sa.String()),
-            sa.column("max_photos", sa.Integer()),
-            sa.column("max_storage_bytes", sa.BigInteger()),
-            sa.column("max_matching_searches", sa.Integer()),
-            sa.column("retention_days", sa.Integer()),
-            sa.column("price_cents", sa.Integer()),
-            sa.column("currency", sa.String()),
-            sa.column("active", sa.Boolean()),
-        ),
-        [
-            {"tier": "free_trial", "max_photos": 100, "max_storage_bytes": 1073741824,
-             "max_matching_searches": 25, "retention_days": 30, "price_cents": 0,
-             "currency": "usd", "active": True},
-            {"tier": "standard", "max_photos": 5000, "max_storage_bytes": 26843545600,
-             "max_matching_searches": 500, "retention_days": 90, "price_cents": 4900,
-             "currency": "usd", "active": True},
-            {"tier": "pro", "max_photos": 25000, "max_storage_bytes": 107374182400,
-             "max_matching_searches": 2500, "retention_days": 180, "price_cents": 14900,
-             "currency": "usd", "active": True},
-            {"tier": "enterprise", "max_photos": 1000000, "max_storage_bytes": 1099511627776,
-             "max_matching_searches": 100000, "retention_days": 365, "price_cents": 0,
-             "currency": "usd", "active": True},
-        ],
-    )
+    for values in (
+        {
+            "tier": "free_trial",
+            "max_photos": 100,
+            "max_storage_bytes": 1073741824,
+            "max_matching_searches": 25,
+            "retention_days": 30,
+            "price_cents": 0,
+            "currency": "usd",
+            "active": True,
+        },
+        {
+            "tier": "standard",
+            "max_photos": 5000,
+            "max_storage_bytes": 26843545600,
+            "max_matching_searches": 500,
+            "retention_days": 90,
+            "price_cents": 4900,
+            "currency": "usd",
+            "active": True,
+        },
+        {
+            "tier": "pro",
+            "max_photos": 25000,
+            "max_storage_bytes": 107374182400,
+            "max_matching_searches": 2500,
+            "retention_days": 180,
+            "price_cents": 14900,
+            "currency": "usd",
+            "active": True,
+        },
+        {
+            "tier": "enterprise",
+            "max_photos": 1000000,
+            "max_storage_bytes": 1099511627776,
+            "max_matching_searches": 100000,
+            "retention_days": 365,
+            "price_cents": 0,
+            "currency": "usd",
+            "active": True,
+        },
+    ):
+        op.execute(
+            sa.text(
+                f"""
+                INSERT INTO plans (
+                    tier,
+                    max_photos,
+                    max_storage_bytes,
+                    max_matching_searches,
+                    retention_days,
+                    price_cents,
+                    currency,
+                    active
+                )
+                VALUES (
+                    CAST('{values["tier"]}' AS plan_tier),
+                    {values["max_photos"]},
+                    {values["max_storage_bytes"]},
+                    {values["max_matching_searches"]},
+                    {values["retention_days"]},
+                    {values["price_cents"]},
+                    '{values["currency"]}',
+                    {str(values["active"]).upper()}
+                )
+                """
+            )
+        )
 
     op.add_column(
         "events",

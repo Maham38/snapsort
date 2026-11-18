@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -255,3 +256,12 @@ def test_checkout_requires_ownership_and_organizer_role(db: Session) -> None:
     activated = main.activate_enterprise_plan(event.id, user=owner, db=db)
     assert activated.tier == PlanTier.enterprise
     assert activated.status == PlanStatus.active
+
+
+def test_billing_migration_casts_plan_tier_seed_values() -> None:
+    migration = Path(__file__).parents[1] / "migrations" / "versions" / "0004_billing.py"
+    source = migration.read_text(encoding="utf-8")
+
+    assert "CAST('" in source
+    assert "AS plan_tier)" in source
+    assert "op.bulk_insert(" not in source
