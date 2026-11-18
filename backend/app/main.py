@@ -1,14 +1,21 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import secrets
 import string
 import uuid
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import current_user, require_roles
+from app.billing import (
+    activate_event_plan,
+    active_plan_for_event,
+    get_or_create_usage,
+    get_payment_provider,
+    get_plan,
+)
 from app.config import get_settings
 from app.db import get_db
 from app.models import (
@@ -25,6 +32,12 @@ from app.models import (
     ProcessingStatus,
     Role,
     User,
+    EventUsage,
+    Payment,
+    PaymentStatus,
+    Plan,
+    PlanStatus,
+    PlanTier,
 )
 from app.schemas import (
     EventCreate,
@@ -43,8 +56,19 @@ from app.schemas import (
     UploadResponse,
     UploadedPhotoResponse,
     UserResponse,
+    CheckoutRequest,
+    CheckoutResponse,
+    EventPlanResponse,
+    PaymentResponse,
+    PlanResponse,
+    UsageResponse,
 )
-from app.storage import create_download_url, create_upload_url, object_exists
+from app.storage import (
+    create_download_url,
+    create_upload_url,
+    object_exists,
+    object_size,
+)
 from app.jobs import enqueue_matching, enqueue_photo_processing
 
 
@@ -65,6 +89,49 @@ app.add_middleware(
     allow_methods=["DELETE", "GET", "POST", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+def _owned_event(event_id: str, user: User, db: Session) -> Event:
+    event = db.get(Event, event_id)
+    if event is None or event.organizer_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    return event
+
+
+def _plan_response(plan) -> PlanResponse:
+    return PlanResponse(
+        tier=plan.tier,
+        max_photos=plan.max_photos,
+        max_storage_bytes=plan.max_storage_bytes,
+        max_matching_searches=plan.max_matching_searches,
+        retention_days=plan.retention_days,
+        price_cents=plan.price_cents,
+        currency=plan.currency,
+    )
+
+
+def _event_plan_response(event: Event, plan, usage: EventUsage) -> EventPlanResponse:
+    return EventPlanResponse(
+        tier=event.plan_tier,
+        status=event.plan_status,
+        expires_at=event.expires_at,
+        limits=_plan_response(plan) if plan is not None else None,
+        usage=UsageResponse(
+            photo_count=usage.photo_count,
+            storage_bytes=usage.storage_bytes,
+            matching_searches=usage.matching_searches,
+        ),
+    )
+
+
+def _require_event_plan(event: Event, db: Session):
+    plan = active_plan_for_event(db, event)
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="This event needs an active plan before it can accept uploads or matching searches.",
+        )
+    return plan
 
 
 @app.get("/health")
@@ -99,15 +166,39 @@ def create_event(
     user: User = Depends(require_roles(Role.organizer)),
     db: Session = Depends(get_db),
 ) -> Event:
+    trial_plan = db.scalar(
+        select(Plan).where(
+            Plan.tier == PlanTier.free_trial,
+            Plan.active.is_(True),
+        )
+    )
+    has_trial = db.scalar(
+        select(Event.id)
+        .where(
+            Event.organizer_id == user.id,
+            Event.plan_tier == PlanTier.free_trial,
+        )
+        .limit(1)
+    ) is not None
     for _ in range(3):
         event = Event(
             organizer_id=user.id,
             name=payload.name,
             description=payload.description,
             event_code=_event_code(),
+            plan_tier=PlanTier.free_trial if not has_trial and trial_plan else None,
+            plan_status=PlanStatus.trial if not has_trial and trial_plan else PlanStatus.expired,
+            expires_at=(
+                datetime.now(timezone.utc)
+                + timedelta(days=trial_plan.retention_days)
+                if not has_trial and trial_plan
+                else None
+            ),
         )
         db.add(event)
         try:
+            db.commit()
+            get_or_create_usage(db, event.id)
             db.commit()
             db.refresh(event)
             return event
@@ -126,6 +217,125 @@ def list_events(
 ) -> list[Event]:
     statement = select(Event).where(Event.organizer_id == user.id)
     return list(db.scalars(statement).all())
+
+
+@app.get("/api/v1/plans", response_model=list[PlanResponse])
+def list_plans(
+    user: User = Depends(require_roles(Role.organizer)),
+    db: Session = Depends(get_db),
+) -> list[Plan]:
+    return list(
+        db.scalars(select(Plan).where(Plan.active.is_(True)).order_by(Plan.price_cents))
+        .all()
+    )
+
+
+@app.get("/api/v1/events/{event_id}/plan", response_model=EventPlanResponse)
+def get_event_plan(
+    event_id: str,
+    user: User = Depends(require_roles(Role.organizer)),
+    db: Session = Depends(get_db),
+) -> EventPlanResponse:
+    event = _owned_event(event_id, user, db)
+    return _event_plan_response(
+        event,
+        get_plan(db, event.plan_tier) if event.plan_tier else None,
+        get_or_create_usage(db, event.id),
+    )
+
+
+@app.post("/api/v1/events/{event_id}/checkout", response_model=CheckoutResponse)
+def create_checkout(
+    event_id: str,
+    payload: CheckoutRequest,
+    user: User = Depends(require_roles(Role.organizer)),
+    db: Session = Depends(get_db),
+) -> CheckoutResponse:
+    event = _owned_event(event_id, user, db)
+    if payload.tier in (PlanTier.free_trial, PlanTier.enterprise):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Free trial is assigned automatically; enterprise plans require manual activation.",
+        )
+    plan = get_plan(db, payload.tier)
+    if plan is None or not plan.active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    payment = Payment(
+        event_id=event.id,
+        organizer_id=user.id,
+        provider="stripe",
+        provider_ref=f"pending:{uuid.uuid4()}",
+        amount=plan.price_cents,
+        currency=plan.currency,
+        status=PaymentStatus.pending,
+    )
+    db.add(payment)
+    db.flush()
+    try:
+        provider = get_payment_provider()
+        checkout = provider.create_checkout_session(
+            event=event,
+            plan=plan,
+            payment_id=payment.id,
+        )
+    except RuntimeError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    payment.provider_ref = checkout.provider_ref
+    db.commit()
+    return CheckoutResponse(
+        payment_id=payment.id,
+        checkout_url=checkout.checkout_url,
+        provider=provider.name,
+        expires_at=event.expires_at,
+    )
+
+
+@app.post("/api/v1/billing/webhook", response_model=PaymentResponse)
+async def billing_webhook(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+    db: Session = Depends(get_db),
+) -> PaymentResponse:
+    if not stripe_signature:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Webhook signature required")
+    try:
+        provider = get_payment_provider()
+        webhook = provider.verify_webhook(await request.body(), stripe_signature)
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+    payment = db.scalar(
+        select(Payment).where(
+            Payment.provider == provider.name,
+            Payment.provider_ref == webhook.provider_ref,
+        )
+    )
+    if payment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    if payment.status == PaymentStatus.paid:
+        return PaymentResponse(payment_id=payment.id, status=payment.status)
+    if payment.event_id != webhook.event_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment event mismatch")
+    event = db.get(Event, payment.event_id)
+    plan = get_plan(db, webhook.tier)
+    if event is None or plan is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment plan is invalid")
+    payment.status = webhook.status
+    if webhook.status == PaymentStatus.paid:
+        activate_event_plan(db, event=event, plan=plan)
+    db.commit()
+    return PaymentResponse(payment_id=payment.id, status=payment.status)
 
 
 @app.get("/api/v1/events/{event_id}", response_model=EventResponse)
@@ -332,8 +542,37 @@ def request_upload(
     user: User = Depends(require_roles(Role.photographer, Role.organizer)),
     db: Session = Depends(get_db),
 ) -> UploadResponse:
-    if not _can_upload(event_id, user, db):
+    event = db.get(Event, event_id)
+    if event is None or not _can_upload(event_id, user, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    plan = _require_event_plan(event, db)
+    settings = get_settings()
+    if payload.size_bytes > settings.max_upload_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Each photo must be {settings.max_upload_size_bytes} bytes or smaller.",
+        )
+    usage = get_or_create_usage(db, event.id, lock=True)
+    pending_count, pending_bytes = db.execute(
+        select(
+            func.count(Photo.id),
+            func.coalesce(func.sum(Photo.size_bytes), 0),
+        ).where(
+            Photo.event_id == event.id,
+            Photo.usage_counted.is_(False),
+            Photo.processing_status != ProcessingStatus.failed,
+        )
+    ).one()
+    if usage.photo_count + pending_count + 1 > plan.max_photos:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="This event has reached its photo limit. Upgrade the event plan.",
+        )
+    if usage.storage_bytes + int(pending_bytes) + payload.size_bytes > plan.max_storage_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="This event has reached its storage limit. Upgrade the event plan.",
+        )
     photo_id = str(uuid.uuid4())
     storage_key = f"events/{event_id}/photos/{photo_id}/{payload.filename}"
     try:
@@ -349,6 +588,7 @@ def request_upload(
         uploaded_by=user.id,
         storage_key=storage_key,
         checksum=payload.checksum,
+        size_bytes=payload.size_bytes,
         processing_status=ProcessingStatus.pending,
     )
     db.add(photo)
@@ -382,6 +622,38 @@ def complete_upload(
             status_code=status.HTTP_409_CONFLICT,
             detail="Photo has not finished uploading to storage",
         )
+    try:
+        actual_size = object_size(photo.storage_key)
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    if actual_size > get_settings().max_upload_size_bytes or actual_size > photo.size_bytes:
+        photo.processing_status = ProcessingStatus.failed
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded photo exceeds the size reserved for this event.",
+        )
+    if not photo.usage_counted:
+        usage = get_or_create_usage(db, photo.event_id, lock=True)
+        event = db.get(Event, photo.event_id)
+        if event is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        plan = _require_event_plan(event, db)
+        if (
+            usage.photo_count + 1 > plan.max_photos
+            or usage.storage_bytes + actual_size > plan.max_storage_bytes
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="This event has reached its plan quota.",
+            )
+        photo.size_bytes = actual_size
+        usage.photo_count += 1
+        usage.storage_bytes += actual_size
+        photo.usage_counted = True
     photo.processing_status = ProcessingStatus.pending
     db.commit()
     try:
@@ -523,17 +795,28 @@ def create_matching_job(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Active face-matching consent is required",
         )
+    event = db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    plan = _require_event_plan(event, db)
     if not payload.selfie_storage_key.startswith(
         f"events/{event_id}/selfies/{user.id}/"
     ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid selfie object")
     if not object_exists(payload.selfie_storage_key):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selfie upload is incomplete")
+    usage = get_or_create_usage(db, event_id, lock=True)
+    if usage.matching_searches >= plan.max_matching_searches:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="This event has reached its matching-search limit. Upgrade the event plan.",
+        )
     job = MatchingJob(
         event_id=event_id,
         attendee_id=user.id,
         selfie_storage_key=payload.selfie_storage_key,
     )
+    usage.matching_searches += 1
     db.add(job)
     db.commit()
     db.refresh(job)

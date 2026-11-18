@@ -70,6 +70,24 @@ def object_exists(storage_key: str) -> bool:
     return True
 
 
+def object_size(storage_key: str) -> int:
+    base_url, service_key, bucket = _storage_config()
+    path = quote(storage_key, safe="/")
+    endpoint = f"{base_url}/storage/v1/object/{bucket}/{path}"
+    try:
+        response = httpx.head(endpoint, headers=_headers(service_key), timeout=10)
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise RuntimeError("Supabase Storage could not inspect the object") from error
+    content_length = response.headers.get("content-length")
+    if content_length is None:
+        raise RuntimeError("Supabase Storage returned no object size")
+    try:
+        return int(content_length)
+    except ValueError as error:
+        raise RuntimeError("Supabase Storage returned an invalid object size") from error
+
+
 def download_object(storage_key: str) -> bytes:
     base_url, service_key, bucket = _storage_config()
     path = quote(storage_key, safe="/")

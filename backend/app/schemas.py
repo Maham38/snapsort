@@ -2,7 +2,15 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import ConsentType, EventStatus, ProcessingStatus, Role
+from app.models import (
+    ConsentType,
+    EventStatus,
+    PaymentStatus,
+    PlanStatus,
+    PlanTier,
+    ProcessingStatus,
+    Role,
+)
 
 
 class UserResponse(BaseModel):
@@ -50,6 +58,7 @@ class PhotographerAssignmentCreate(BaseModel):
 class UploadRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(pattern=r"^image/(jpeg|png|webp)$")
+    size_bytes: int = Field(gt=0)
     checksum: str | None = Field(default=None, max_length=128)
 
 
@@ -103,3 +112,45 @@ class MatchResultResponse(BaseModel):
     similarity: float
     photo_url: str
     favorite: bool = False
+
+
+class PlanResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    tier: PlanTier
+    max_photos: int
+    max_storage_bytes: int
+    max_matching_searches: int
+    retention_days: int
+    price_cents: int
+    currency: str
+
+
+class UsageResponse(BaseModel):
+    photo_count: int
+    storage_bytes: int
+    matching_searches: int
+
+
+class EventPlanResponse(BaseModel):
+    tier: PlanTier | None
+    status: PlanStatus
+    expires_at: datetime | None
+    limits: PlanResponse | None
+    usage: UsageResponse
+
+
+class CheckoutRequest(BaseModel):
+    tier: PlanTier
+
+
+class CheckoutResponse(BaseModel):
+    payment_id: str
+    checkout_url: str
+    provider: str
+    expires_at: datetime | None
+
+
+class PaymentResponse(BaseModel):
+    payment_id: str
+    status: PaymentStatus

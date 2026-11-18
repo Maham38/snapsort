@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     ai_model_name: str = "buffalo_l"
     ai_model_root: str | None = None
     ai_match_threshold: float = Field(default=0.45, gt=0, lt=1)
+    max_upload_size_bytes: int = Field(default=26214400, gt=0)
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_success_url: str = "https://example.invalid/billing/success"
+    stripe_cancel_url: str = "https://example.invalid/billing/cancel"
+    stripe_webhook_tolerance_seconds: int = Field(default=300, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
